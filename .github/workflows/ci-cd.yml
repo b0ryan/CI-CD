@@ -1,0 +1,120 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+  pull_request:
+    branches:
+      - main
+      - master
+      - develop
+
+jobs:
+  build:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'none'
+      
+      - name: Create build directory
+        run: mkdir -p build/programs
+      
+      - name: Compile Java sources
+        run: |
+          javac -cp "libs/heroes_task_lib-1.0-SNAPSHOT.jar" \
+                -d build \
+                src/programs/*.java
+        continue-on-error: false
+      
+      - name: Create JAR file
+        run: |
+          jar cf obf.jar -C build programs
+        continue-on-error: false
+      
+      - name: Verify JAR file
+        run: |
+          if [ ! -f obf.jar ]; then
+            echo "Error: obf.jar was not created"
+            exit 1
+          fi
+          echo "JAR file created successfully"
+          jar tf obf.jar | head -20
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+            obf.jar
+            build/
+          retention-days: 7
+
+  deploy:
+    name: Deploy Application
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+          path: artifacts/
+      
+      - name: Display deployment info
+        run: |
+          echo "Deployment artifacts ready:"
+          ls -lh artifacts/
+          echo "JAR file size:"
+          ls -lh artifacts/obf.jar || echo "JAR file not found"
+      
+      # SSH Deployment (uncomment and configure if you have a remote server)
+      # - name: Deploy via SSH
+      #   uses: appleboy/ssh-action@v1.0.0
+      #   with:
+      #     host: ${{ secrets.DEPLOY_HOST }}
+      #     username: ${{ secrets.DEPLOY_USER }}
+      #     key: ${{ secrets.DEPLOY_SSH_KEY }}
+      #     port: ${{ secrets.DEPLOY_PORT || 22 }}
+      #     script: |
+      #       cd /path/to/deployment
+      #       # Stop existing application if running
+      #       # Copy new JAR file
+      #       cp artifacts/obf.jar /path/to/deployment/obf.jar
+      #       # Restart application
+      #       # Add your deployment commands here
+      
+      # Alternative: Deploy to GitHub Releases
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/obf.jar
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      # Alternative: Upload to artifact storage
+      - name: Archive deployment artifacts
+        run: |
+          echo "Artifacts are ready for deployment"
+          echo "To deploy manually, download artifacts from the workflow run"
+          echo "Or configure SSH deployment by uncommenting the SSH step above"
+
